@@ -27,14 +27,14 @@ export async function createSharePointSubscription(
 ): Promise<string> {
   const client = getGraphClient();
   const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(); // 3 days max for SP lists
-  const subscription = await client.api("/subscriptions").post({
+  const subscription = (await client.api("/subscriptions").post({
     changeType: "created,updated,deleted",
     notificationUrl,
     resource: `/sites/${siteId}/lists/${listId}/items`,
     expirationDateTime: expiresAt,
     clientState: process.env.WEBHOOK_CLIENT_STATE ?? "scopeguardian-secret",
-  });
-  return subscription.id as string;
+  })) as { id: string };
+  return subscription.id;
 }
 
 export async function renewSubscription(subscriptionId: string): Promise<void> {

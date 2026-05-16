@@ -2,7 +2,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/fu
 import { BotFrameworkAdapter, TurnContext, WebRequest, WebResponse } from "botbuilder";
 import { BotActivityPayload, FeedbackAction } from "../models/FeedbackLog";
 import { updateViolationStatus, insertFeedbackLog, listViolations, getScopeSummary } from "../services/cosmosDbService";
-import { buildConfirmationCard, buildScopeStatusCard, cardToJson } from "../utils/adaptiveCardBuilder";
+import { buildConfirmationCard, buildScopeStatusCard } from "../utils/adaptiveCardBuilder";
 import { v4 as uuidv4 } from "uuid";
 
 let adapter: BotFrameworkAdapter | null = null;

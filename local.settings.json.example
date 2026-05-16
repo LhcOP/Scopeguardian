@@ -1,0 +1,37 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+
+    "AZURE_TENANT_ID": "<your-tenant-id>",
+    "AZURE_CLIENT_ID": "<app-registration-client-id>",
+    "AZURE_CLIENT_SECRET": "<app-registration-client-secret>",
+
+    "AZURE_STORAGE_CONNECTION_STRING": "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net",
+
+    "COSMOS_ENDPOINT": "https://<your-account>.documents.azure.com:443/",
+    "COSMOS_KEY": "<your-cosmos-primary-key>",
+
+    "AI_SEARCH_ENDPOINT": "https://<your-search-service>.search.windows.net",
+    "AI_SEARCH_KEY": "<your-search-admin-key>",
+
+    "AZURE_OPENAI_ENDPOINT": "https://<your-resource>.openai.azure.com/",
+    "AZURE_OPENAI_KEY": "<your-aoai-key>",
+    "AZURE_OPENAI_API_VERSION": "2024-08-01-preview",
+
+    "BOT_APP_ID": "<teams-bot-app-id>",
+    "BOT_APP_PASSWORD": "<teams-bot-app-password>",
+    "BOT_SERVICE_URL": "https://smba.trafficmanager.net/teams/",
+
+    "WEBHOOK_CLIENT_STATE": "scopeguardian-secret",
+    "WEBHOOK_NOTIFICATION_URL": "https://<your-function-app>.azurewebsites.net/api/webhook/graph?code=<function-key>",
+
+    "DEFAULT_PROJECT_ID": "project-001",
+    "PROJECT_IDS": "project-001,project-002",
+    "PROJECT_CONFIGS": "project-001:<sharepoint-site-id>:<list-id>,project-002:<site-id>:<list-id>",
+
+    "TEAMS_TEAM_ID": "<your-teams-team-id>",
+    "TEAMS_CHANNEL_ID": "<your-teams-channel-id>"
+  }
+}

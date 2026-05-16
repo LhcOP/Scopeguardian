@@ -72,10 +72,9 @@ export async function downloadScopeMarkdown(projectId: string): Promise<string |
 }
 
 async function streamToString(stream: NodeJS.ReadableStream): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    stream.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    stream.on("error", reject);
-  });
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of stream) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Uint8Array));
+  }
+  return Buffer.concat(chunks).toString("utf-8");
 }

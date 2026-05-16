@@ -74,6 +74,6 @@ describe("cardToJson", () => {
   it("produces valid JSON string", () => {
     const card = buildConfirmationCard("Test", true);
     const json = cardToJson(card);
-    expect(() => JSON.parse(json)).not.toThrow();
+    expect(() => JSON.parse(json) as unknown).not.toThrow();
   });
 });
