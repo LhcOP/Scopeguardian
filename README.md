@@ -62,7 +62,7 @@ Scope onboarding:
 
 ### 2. Bot registration (Teams)
 
-1. Create an **Azure Bot** resource (multi-tenant). Note the Microsoft App ID + password.
+1. Create an **Azure Bot** resource (**single-tenant** — Azure has deprecated multi-tenant bot creation). Note the Microsoft App ID + password; set `BOT_APP_TYPE=SingleTenant` (default) and ensure `AZURE_TENANT_ID` is set.
 2. Channels → enable **Microsoft Teams**.
 3. Messaging endpoint: `https://<function-app>.azurewebsites.net/api/bot/messages`.
 4. Package the bot in a Teams app manifest and install it in the target team (required for proactive channel alerts).

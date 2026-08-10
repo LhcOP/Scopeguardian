@@ -18,13 +18,14 @@
 
     "AZURE_OPENAI_ENDPOINT": "https://<your-resource>.openai.azure.com/",
     "AZURE_OPENAI_KEY": "<your-aoai-key>",
-    "AZURE_OPENAI_API_VERSION": "2024-08-01-preview",
-    "AZURE_OPENAI_CHAT_DEPLOYMENT": "gpt-4o",
-    "AZURE_OPENAI_MINI_DEPLOYMENT": "gpt-4o-mini",
+    "AZURE_OPENAI_API_VERSION": "2024-10-21",
+    "AZURE_OPENAI_CHAT_DEPLOYMENT": "gpt-4.1",
+    "AZURE_OPENAI_MINI_DEPLOYMENT": "gpt-4.1-mini",
     "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": "text-embedding-3-small",
 
     "BOT_APP_ID": "<teams-bot-app-id>",
     "BOT_APP_PASSWORD": "<teams-bot-app-password>",
+    "BOT_APP_TYPE": "SingleTenant",
     "BOT_SERVICE_URL": "https://smba.trafficmanager.net/teams/",
 
     "WEBHOOK_CLIENT_STATE": "<generate-a-long-random-secret>",

@@ -19,10 +19,12 @@ export function getCloudAdapter(): CloudAdapter {
     if (!appId || !appPassword) {
       throw new Error("BOT_APP_ID or BOT_APP_PASSWORD is not set");
     }
+    // Azure has deprecated multi-tenant bot creation — default to SingleTenant
     const credentialsFactory = new ConfigurationServiceClientCredentialFactory({
       MicrosoftAppId: appId,
       MicrosoftAppPassword: appPassword,
-      MicrosoftAppType: "MultiTenant",
+      MicrosoftAppType: process.env.BOT_APP_TYPE ?? "SingleTenant",
+      MicrosoftAppTenantId: process.env.AZURE_TENANT_ID,
     });
     const botAuth = new ConfigurationBotFrameworkAuthentication({}, credentialsFactory);
     adapter = new CloudAdapter(botAuth);
