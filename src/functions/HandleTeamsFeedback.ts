@@ -1,21 +1,16 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
-import { BotFrameworkAdapter, TurnContext, WebRequest, WebResponse } from "botbuilder";
+import { TurnContext, Request as BotRequest, Response as BotResponse } from "botbuilder";
 import { BotActivityPayload, FeedbackAction } from "../models/FeedbackLog";
-import { updateViolationStatus, insertFeedbackLog, listViolations, getScopeSummary } from "../services/cosmosDbService";
+import {
+  updateViolationStatus,
+  insertFeedbackLog,
+  listViolations,
+  getScopeSummary,
+  saveConversationRef,
+} from "../services/cosmosDbService";
 import { buildConfirmationCard, buildScopeStatusCard } from "../utils/adaptiveCardBuilder";
+import { getCloudAdapter } from "../services/teamsNotifier";
 import { v4 as uuidv4 } from "uuid";
-
-let adapter: BotFrameworkAdapter | null = null;
-
-function getAdapter(): BotFrameworkAdapter {
-  if (!adapter) {
-    const appId = process.env.BOT_APP_ID;
-    const appPassword = process.env.BOT_APP_PASSWORD;
-    if (!appId || !appPassword) throw new Error("BOT_APP_ID or BOT_APP_PASSWORD is not set");
-    adapter = new BotFrameworkAdapter({ appId, appPassword });
-  }
-  return adapter;
-}
 
 const FEEDBACK_ACTION_TO_STATUS: Partial<Record<FeedbackAction, "acknowledged" | "dismissed" | "escalated">> = {
   scope_violation_acknowledged: "acknowledged",
@@ -23,37 +18,59 @@ const FEEDBACK_ACTION_TO_STATUS: Partial<Record<FeedbackAction, "acknowledged" |
   scope_violation_escalated: "escalated",
 };
 
-/** Adapts Azure Functions HttpRequest into the Bot Framework WebRequest shape. */
-async function toWebRequest(req: HttpRequest): Promise<WebRequest> {
-  const body = await req.text();
-  return {
-    body,
-    headers: Object.fromEntries(req.headers.entries()),
-    method: req.method,
-    originalUrl: req.url,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as unknown as WebRequest;
-}
-
 /**
- * HTTP trigger — receives Bot Framework activity from Teams (Adaptive Card submits and messages).
+ * HTTP trigger — receives Bot Framework activity from Teams (Adaptive Card
+ * submits and messages) via the CloudAdapter. Adapter-level JWT validation
+ * makes authLevel "anonymous" safe here.
  */
 async function handleTeamsFeedbackHandler(
   req: HttpRequest,
   context: InvocationContext
 ): Promise<HttpResponseInit> {
-  const botAdapter = getAdapter();
+  let parsedBody: unknown;
+  try {
+    parsedBody = await req.json();
+  } catch {
+    return { status: 400, body: "Invalid JSON payload" };
+  }
+
   let statusCode = 200;
+  let responseBody: unknown;
 
-  const webReq = await toWebRequest(req);
-  const webRes: WebResponse = {
-    status(code: number) { statusCode = code; return this; },
-    send() { return this; },
-    end() { return; },
-  } as unknown as WebResponse;
+  const botReq = {
+    body: parsedBody,
+    headers: Object.fromEntries(req.headers.entries()),
+    method: req.method,
+  } as unknown as BotRequest;
 
-  await botAdapter.processActivity(webReq, webRes, async (turnContext: TurnContext) => {
+  const botRes = {
+    status(code: number) {
+      statusCode = code;
+      return this;
+    },
+    send(body?: unknown) {
+      responseBody = body;
+      return this;
+    },
+    header() {
+      return this;
+    },
+    end() {
+      return this;
+    },
+  } as unknown as BotResponse;
+
+  await getCloudAdapter().process(botReq, botRes, async (turnContext: TurnContext) => {
     const activity = turnContext.activity as unknown as BotActivityPayload;
+
+    // Capture the conversation reference so proactive alerts use the real serviceUrl
+    if (activity.conversation?.id) {
+      const reference = TurnContext.getConversationReference(turnContext.activity);
+      await saveConversationRef(
+        activity.conversation.id,
+        reference as unknown as Record<string, unknown>
+      ).catch((err) => context.warn("Failed to save conversation reference:", err));
+    }
 
     // Handle Adaptive Card submit actions
     if (activity.type === "message" && activity.value) {
@@ -72,14 +89,18 @@ async function handleTeamsFeedbackHandler(
 
     // Handle plain text commands
     if (activity.type === "message" && activity.text) {
-      await handleTextCommand(turnContext, activity.text.trim().toLowerCase(), activity, context);
+      await handleTextCommand(turnContext, activity.text.trim().toLowerCase(), context);
       return;
     }
 
-    await turnContext.sendActivity("I received your message but wasn't sure how to handle it. Try `/status <projectId>`.");
+    if (activity.type === "message") {
+      await turnContext.sendActivity(
+        "I received your message but wasn't sure how to handle it. Try `/status <projectId>`."
+      );
+    }
   });
 
-  return { status: statusCode };
+  return { status: statusCode, jsonBody: responseBody };
 }
 
 async function handleViolationFeedback(
@@ -130,7 +151,6 @@ async function handleViolationFeedback(
 async function handleTextCommand(
   ctx: TurnContext,
   text: string,
-  activity: BotActivityPayload,
   context: InvocationContext
 ): Promise<void> {
   const parts = text.split(/\s+/);

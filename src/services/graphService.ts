@@ -1,36 +1,56 @@
 import { Client } from "@microsoft/microsoft-graph-client";
-import { ClientSecretCredential } from "@azure/identity";
+import { ClientSecretCredential, DefaultAzureCredential, TokenCredential } from "@azure/identity";
 import { TokenCredentialAuthenticationProvider } from "@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials";
-import { GraphChangeNotification, TaskEvent } from "../models/TaskEvent";
+import { TaskEvent } from "../models/TaskEvent";
 import { v4 as uuidv4 } from "uuid";
 
 const GRAPH_SCOPES = ["https://graph.microsoft.com/.default"];
 
-function getGraphClient(): Client {
+// If created/modified are within this window, treat the change as a creation.
+const CREATED_EVENT_WINDOW_MS = 2 * 60 * 1000;
+
+let graphClient: Client | null = null;
+
+function getCredential(): TokenCredential {
   const tenantId = process.env.AZURE_TENANT_ID;
   const clientId = process.env.AZURE_CLIENT_ID;
   const clientSecret = process.env.AZURE_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) {
-    throw new Error("AZURE_TENANT_ID, AZURE_CLIENT_ID, or AZURE_CLIENT_SECRET is not set");
+  if (tenantId && clientId && clientSecret) {
+    return new ClientSecretCredential(tenantId, clientId, clientSecret);
   }
-  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, { scopes: GRAPH_SCOPES });
-  return Client.initWithMiddleware({ authProvider });
+  // Falls back to Managed Identity / az login when no client secret is configured
+  return new DefaultAzureCredential();
+}
+
+function getGraphClient(): Client {
+  if (!graphClient) {
+    const authProvider = new TokenCredentialAuthenticationProvider(getCredential(), {
+      scopes: GRAPH_SCOPES,
+    });
+    graphClient = Client.initWithMiddleware({ authProvider });
+  }
+  return graphClient;
 }
 
 // ── Subscription Management ───────────────────────────────────────────────────
 
+/**
+ * Creates a Graph change subscription on a SharePoint list.
+ * Note: SharePoint list subscriptions only support changeType "updated" and
+ * must target the list resource itself (not /items). Notifications carry no
+ * resourceData — changed items are discovered via delta queries.
+ */
 export async function createSharePointSubscription(
   siteId: string,
   listId: string,
   notificationUrl: string
 ): Promise<string> {
   const client = getGraphClient();
-  const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(); // 3 days max for SP lists
+  const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
   const subscription = (await client.api("/subscriptions").post({
-    changeType: "created,updated,deleted",
+    changeType: "updated",
     notificationUrl,
-    resource: `/sites/${siteId}/lists/${listId}/items`,
+    resource: `/sites/${siteId}/lists/${listId}`,
     expirationDateTime: expiresAt,
     clientState: process.env.WEBHOOK_CLIENT_STATE ?? "scopeguardian-secret",
   })) as { id: string };
@@ -48,81 +68,93 @@ export async function deleteSubscription(subscriptionId: string): Promise<void> 
   await client.api(`/subscriptions/${subscriptionId}`).delete();
 }
 
-// ── SharePoint List Item Fetching ─────────────────────────────────────────────
+// ── Delta Queries ─────────────────────────────────────────────────────────────
 
-export async function fetchSharePointListItem(
+export interface SharePointListItem {
+  id: string;
+  eTag?: string;
+  createdDateTime?: string;
+  lastModifiedDateTime?: string;
+  deleted?: { state: string };
+  fields?: Record<string, unknown>;
+}
+
+interface DeltaPage {
+  value?: SharePointListItem[];
+  "@odata.nextLink"?: string;
+  "@odata.deltaLink"?: string;
+}
+
+export interface DeltaResult {
+  items: SharePointListItem[];
+  deltaLink: string | null;
+}
+
+/**
+ * Fetches all changed list items since the given deltaLink (or the full list
+ * when no link is provided), following nextLinks until exhausted.
+ */
+export async function fetchListItemDelta(
   siteId: string,
   listId: string,
-  itemId: string
-): Promise<Record<string, unknown>> {
+  deltaLink?: string
+): Promise<DeltaResult> {
   const client = getGraphClient();
-  return client.api(`/sites/${siteId}/lists/${listId}/items/${itemId}?expand=fields`).get() as Promise<
-    Record<string, unknown>
-  >;
-}
+  let url = deltaLink ?? `/sites/${siteId}/lists/${listId}/items/delta?$expand=fields`;
+  const items: SharePointListItem[] = [];
 
-// ── Notification → TaskEvent Mapping ─────────────────────────────────────────
-
-export async function mapNotificationToTaskEvent(
-  notification: GraphChangeNotification,
-  projectId: string
-): Promise<TaskEvent | null> {
-  if (!notification.resourceData) return null;
-
-  // Extract siteId and listId from the resource path
-  // resource format: "sites/{siteId}/lists/{listId}/items/{itemId}"
-  const parts = notification.resource.split("/");
-  const siteId = parts[1];
-  const listId = parts[3];
-  const itemId = notification.resourceData.id;
-
-  try {
-    const rawItem = await fetchSharePointListItem(siteId, listId, itemId);
-    const fields = rawItem.fields as Record<string, unknown>;
-
-    return {
-      eventId: uuidv4(),
-      projectId,
-      eventType: mapChangeType(notification.changeType),
-      occurredAt: new Date().toISOString(),
-      source: "sharepoint",
-      task: {
-        id: itemId,
-        title: String(fields["Title"] ?? "Untitled"),
-        description: String(fields["Description"] ?? ""),
-        assignedTo: fields["AssignedTo"] ? String(fields["AssignedTo"]) : undefined,
-        estimatedHours: fields["EstimatedHours"] ? Number(fields["EstimatedHours"]) : undefined,
-        loggedHours: fields["LoggedHours"] ? Number(fields["LoggedHours"]) : undefined,
-        tags: fields["Tags"] ? String(fields["Tags"]).split(";").map((t) => t.trim()) : [],
-      },
-      rawPayload: rawItem,
-    };
-  } catch (err) {
-    console.error(`Failed to fetch SharePoint item ${itemId}:`, err);
-    return null;
+  for (;;) {
+    const page = (await client.api(url).get()) as DeltaPage;
+    items.push(...(page.value ?? []));
+    if (page["@odata.nextLink"]) {
+      url = page["@odata.nextLink"];
+      continue;
+    }
+    return { items, deltaLink: page["@odata.deltaLink"] ?? null };
   }
 }
 
-function mapChangeType(changeType: string): TaskEvent["eventType"] {
-  switch (changeType) {
-    case "created":
-      return "task_created";
-    case "deleted":
-      return "task_completed";
-    default:
-      return "task_updated";
-  }
+/**
+ * Gets an up-to-date deltaLink without enumerating existing items
+ * (token=latest), so a fresh subscription only reacts to future changes.
+ */
+export async function primeListItemDelta(siteId: string, listId: string): Promise<string | null> {
+  const client = getGraphClient();
+  const page = (await client
+    .api(`/sites/${siteId}/lists/${listId}/items/delta?token=latest`)
+    .get()) as DeltaPage;
+  return page["@odata.deltaLink"] ?? null;
 }
 
-// ── Teams Message Sending ─────────────────────────────────────────────────────
+// ── List Item → TaskEvent Mapping ────────────────────────────────────────────
 
-export async function sendTeamsMessage(
-  channelId: string,
-  teamId: string,
-  content: string
-): Promise<void> {
-  const client = getGraphClient();
-  await client.api(`/teams/${teamId}/channels/${channelId}/messages`).post({
-    body: { contentType: "html", content },
-  });
+/**
+ * Maps a SharePoint list item from a delta result to a TaskEvent.
+ * Returns null for deleted items — deletions are not scope-creep candidates.
+ */
+export function mapListItemToTaskEvent(item: SharePointListItem, projectId: string): TaskEvent | null {
+  if (item.deleted) return null;
+
+  const fields = item.fields ?? {};
+  const created = item.createdDateTime ? Date.parse(item.createdDateTime) : 0;
+  const modified = item.lastModifiedDateTime ? Date.parse(item.lastModifiedDateTime) : created;
+  const eventType = created && modified - created < CREATED_EVENT_WINDOW_MS ? "task_created" : "task_updated";
+
+  return {
+    eventId: uuidv4(),
+    projectId,
+    eventType,
+    occurredAt: new Date().toISOString(),
+    source: "sharepoint",
+    task: {
+      id: item.id,
+      title: String(fields["Title"] ?? "Untitled"),
+      description: String(fields["Description"] ?? ""),
+      assignedTo: fields["AssignedTo"] ? String(fields["AssignedTo"]) : undefined,
+      estimatedHours: fields["EstimatedHours"] ? Number(fields["EstimatedHours"]) : undefined,
+      loggedHours: fields["LoggedHours"] ? Number(fields["LoggedHours"]) : undefined,
+      tags: fields["Tags"] ? String(fields["Tags"]).split(";").map((t) => t.trim()) : [],
+    },
+    rawPayload: item as unknown as Record<string, unknown>,
+  };
 }

@@ -35,6 +35,15 @@ export interface GraphWebhookNotification {
   value: GraphChangeNotification[];
 }
 
+/** Message enqueued by EventTrigger and consumed by ProcessScopeAnalysis. */
+export interface AnalysisQueueMessage {
+  projectId: string;
+  siteId: string;
+  listId: string;
+  subscriptionId: string;
+  notifiedAt: string;
+}
+
 export interface GraphChangeNotification {
   subscriptionId: string;
   subscriptionExpirationDateTime: string;

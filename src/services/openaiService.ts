@@ -4,17 +4,23 @@ import { TaskEvent } from "../models/TaskEvent";
 import { countTokens } from "../utils/tokenOptimizer";
 import { v4 as uuidv4 } from "uuid";
 
-const MINI_MODEL = "gpt-4o-mini";
-const FULL_MODEL = "gpt-4o";
-const EMBEDDING_MODEL = "text-embedding-ada-002";
+// Azure OpenAI uses deployment names — configurable per environment
+const MINI_MODEL = process.env.AZURE_OPENAI_MINI_DEPLOYMENT ?? "gpt-4o-mini";
+const FULL_MODEL = process.env.AZURE_OPENAI_CHAT_DEPLOYMENT ?? "gpt-4o";
+const EMBEDDING_MODEL = process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT ?? "text-embedding-3-small";
 const MAX_CHUNK_TOKENS = 6000;
 
+let cachedClient: AzureOpenAI | null = null;
+
 function getClient(): AzureOpenAI {
-  const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
-  const key = process.env.AZURE_OPENAI_KEY;
-  const apiVersion = process.env.AZURE_OPENAI_API_VERSION ?? "2024-08-01-preview";
-  if (!endpoint || !key) throw new Error("AZURE_OPENAI_ENDPOINT or AZURE_OPENAI_KEY is not set");
-  return new AzureOpenAI({ endpoint, apiKey: key, apiVersion });
+  if (!cachedClient) {
+    const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
+    const key = process.env.AZURE_OPENAI_KEY;
+    const apiVersion = process.env.AZURE_OPENAI_API_VERSION ?? "2024-08-01-preview";
+    if (!endpoint || !key) throw new Error("AZURE_OPENAI_ENDPOINT or AZURE_OPENAI_KEY is not set");
+    cachedClient = new AzureOpenAI({ endpoint, apiKey: key, apiVersion });
+  }
+  return cachedClient;
 }
 
 // ── Embeddings ────────────────────────────────────────────────────────────────
@@ -168,31 +174,6 @@ export async function generateScopeMarkdown(
   });
 
   return response.choices[0].message.content ?? "";
-}
-
-// ── Risk Scoring ──────────────────────────────────────────────────────────────
-
-export async function computeProjectRiskScore(
-  recentViolationsSummary: string,
-  projectName: string
-): Promise<number> {
-  const client = getClient();
-  const response = await client.chat.completions.create({
-    model: MINI_MODEL,
-    temperature: 0,
-    max_tokens: 64,
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are a risk analyst. Given a summary of recent scope violations, return a single integer " +
-          "risk score from 0 (no risk) to 100 (critical risk). Respond with only the integer.",
-      },
-      { role: "user", content: `Project: ${projectName}\n\nRecent Violations:\n${recentViolationsSummary}` },
-    ],
-  });
-  const score = parseInt(response.choices[0].message.content?.trim() ?? "0", 10);
-  return isNaN(score) ? 0 : Math.min(100, Math.max(0, score));
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

@@ -1,11 +1,10 @@
 import { app, Timer, InvocationContext } from "@azure/functions";
 import { downloadMasterScope, uploadScopeMarkdown } from "../services/blobStorageService";
-import { embedScopeItems } from "../services/openaiService";
-import { generateScopeMarkdown, computeProjectRiskScore } from "../services/openaiService";
+import { embedScopeItems, generateScopeMarkdown } from "../services/openaiService";
 import { ensureIndexExists, upsertScopeItems, deleteScopeItemsByProject } from "../services/aiSearchService";
 import { upsertScopeSummary, listViolations } from "../services/cosmosDbService";
-
-const PROJECT_IDS = (process.env.PROJECT_IDS ?? "").split(",").map((id) => id.trim()).filter(Boolean);
+import { parseProjectConfigs } from "../utils/projectConfig";
+import { computeRiskScore } from "../utils/riskScore";
 
 /**
  * Timer-triggered function — runs every 6 hours.
@@ -15,7 +14,13 @@ async function syncMasterScopeHandler(_timer: Timer, context: InvocationContext)
   context.log(`SyncMasterScope triggered at ${new Date().toISOString()}`);
   await ensureIndexExists();
 
-  for (const projectId of PROJECT_IDS) {
+  const projectIds = parseProjectConfigs().map((c) => c.projectId);
+  if (projectIds.length === 0) {
+    context.warn("PROJECT_CONFIGS is empty — nothing to sync");
+    return;
+  }
+
+  for (const projectId of projectIds) {
     context.log(`Syncing master scope for project: ${projectId}`);
     try {
       const scope = await downloadMasterScope(projectId);
@@ -41,22 +46,16 @@ async function syncMasterScopeHandler(_timer: Timer, context: InvocationContext)
       await uploadScopeMarkdown(projectId, markdown);
       context.log(`Scope Markdown summary uploaded for ${projectId}`);
 
-      // Compute risk score from recent violations
-      const violations = await listViolations(projectId, "pending");
-      const violationsSummary = violations
-        .slice(0, 20)
-        .map((v) => `[${v.severity}] ${v.taskTitle}: ${v.reasoning}`)
-        .join("\n");
-      const riskScore = violations.length > 0
-        ? await computeProjectRiskScore(violationsSummary, scope.projectName)
-        : 0;
+      // Refresh summary with the shared deterministic risk score
+      const pending = await listViolations(projectId, "pending");
+      const riskScore = computeRiskScore(pending);
 
       await upsertScopeSummary({
         projectId,
         projectName: scope.projectName,
         totalItems: scope.scopeItems.length,
         lastAnalyzedAt: new Date().toISOString(),
-        violationCount: violations.length,
+        violationCount: pending.length,
         riskScore,
       });
 

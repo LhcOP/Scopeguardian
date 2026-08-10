@@ -1,5 +1,6 @@
 import { BlobServiceClient, ContainerClient } from "@azure/storage-blob";
 import { ProjectScope } from "../models/ProjectScope";
+import { compareVersions } from "../utils/versionCompare";
 
 const SCOPE_CONTAINER = "master-scopes";
 const SUMMARY_CONTAINER = "scope-summaries";
@@ -32,17 +33,17 @@ export async function downloadMasterScope(projectId: string): Promise<ProjectSco
   const container = client.getContainerClient(SCOPE_CONTAINER);
 
   // List blobs for this project and pick the latest version
-  const blobs: { name: string; version: number }[] = [];
+  const blobs: { name: string; version: string }[] = [];
   for await (const blob of container.listBlobsFlat({ prefix: `${projectId}/scope-v` })) {
     const match = blob.name.match(/scope-v(\d+(?:\.\d+)*)\.json$/);
     if (match) {
-      blobs.push({ name: blob.name, version: parseFloat(match[1]) });
+      blobs.push({ name: blob.name, version: match[1] });
     }
   }
 
   if (blobs.length === 0) return null;
 
-  blobs.sort((a, b) => b.version - a.version);
+  blobs.sort((a, b) => compareVersions(b.version, a.version));
   const latest = container.getBlockBlobClient(blobs[0].name);
   const download = await latest.download();
   const text = await streamToString(download.readableStreamBody!);

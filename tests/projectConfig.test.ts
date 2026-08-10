@@ -1,19 +1,6 @@
-// Tests for parseProjectConfigs via the exported helper shape.
-// The timer handler itself requires Azure credentials so is integration-tested only.
+import { parseProjectConfigs } from "../src/utils/projectConfig";
 
-describe("PROJECT_CONFIGS parsing", () => {
-  function parseProjectConfigs(raw: string) {
-    return raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((entry) => {
-        const [projectId, siteId, listId] = entry.split(":");
-        return { projectId, siteId, listId };
-      })
-      .filter((c) => c.projectId && c.siteId && c.listId);
-  }
-
+describe("parseProjectConfigs", () => {
   it("parses a single project config", () => {
     const result = parseProjectConfigs("proj1:site-abc:list-xyz");
     expect(result).toHaveLength(1);
@@ -39,5 +26,15 @@ describe("PROJECT_CONFIGS parsing", () => {
     const result = parseProjectConfigs("  p1:s1:l1 , p2:s2:l2  ");
     expect(result).toHaveLength(2);
     expect(result[0].projectId).toBe("p1");
+  });
+
+  it("reads PROJECT_CONFIGS env var by default", () => {
+    process.env.PROJECT_CONFIGS = "env-proj:env-site:env-list";
+    try {
+      const result = parseProjectConfigs();
+      expect(result).toEqual([{ projectId: "env-proj", siteId: "env-site", listId: "env-list" }]);
+    } finally {
+      delete process.env.PROJECT_CONFIGS;
+    }
   });
 });

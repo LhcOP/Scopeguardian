@@ -10,8 +10,8 @@
     "start": "npm run build && func start",
     "test": "jest --runInBand --forceExit",
     "test:coverage": "jest --runInBand --forceExit --coverage",
-    "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'",
-    "lint:fix": "eslint 'src/**/*.ts' 'tests/**/*.ts' --fix"
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "lint:fix": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --fix"
   },
   "dependencies": {
     "@azure/cosmos": "^4.1.0",
