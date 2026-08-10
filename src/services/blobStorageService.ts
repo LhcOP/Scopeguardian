@@ -30,7 +30,7 @@ export async function uploadMasterScope(scope: ProjectScope): Promise<void> {
 
 export async function downloadMasterScope(projectId: string): Promise<ProjectScope | null> {
   const client = getBlobServiceClient();
-  const container = client.getContainerClient(SCOPE_CONTAINER);
+  const container = await ensureContainer(client, SCOPE_CONTAINER);
 
   // List blobs for this project and pick the latest version
   const blobs: { name: string; version: string }[] = [];

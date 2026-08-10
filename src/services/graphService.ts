@@ -128,6 +128,50 @@ export async function primeListItemDelta(siteId: string, listId: string): Promis
 
 // ── List Item → TaskEvent Mapping ────────────────────────────────────────────
 
+export interface TaskFieldMap {
+  title: string;
+  description: string;
+  assignedTo: string;
+  estimatedHours: string;
+  loggedHours: string;
+  tags: string;
+}
+
+const DEFAULT_FIELD_MAP: TaskFieldMap = {
+  title: "Title",
+  description: "Description",
+  assignedTo: "AssignedTo",
+  estimatedHours: "EstimatedHours",
+  loggedHours: "LoggedHours",
+  tags: "Tags",
+};
+
+/**
+ * Lists differ per customer (e.g. ProjektPoint uses Remarks/Employee/Hours).
+ * TASK_FIELD_MAP overrides individual internal field names as JSON, e.g.
+ *   {"description":"Remarks","assignedTo":"Employee","estimatedHours":"Hours"}
+ */
+function getFieldMap(): TaskFieldMap {
+  const raw = process.env.TASK_FIELD_MAP;
+  if (!raw) return DEFAULT_FIELD_MAP;
+  try {
+    return { ...DEFAULT_FIELD_MAP, ...(JSON.parse(raw) as Partial<TaskFieldMap>) };
+  } catch {
+    return DEFAULT_FIELD_MAP;
+  }
+}
+
+/** Person/lookup columns arrive as objects or as <Field>LookupId — normalise to a string. */
+function fieldToString(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    const name = o.displayName ?? o.LookupValue ?? o.Title ?? o.email;
+    return name != null ? String(name) : undefined;
+  }
+  return String(value);
+}
+
 /**
  * Maps a SharePoint list item from a delta result to a TaskEvent.
  * Returns null for deleted items — deletions are not scope-creep candidates.
@@ -135,10 +179,17 @@ export async function primeListItemDelta(siteId: string, listId: string): Promis
 export function mapListItemToTaskEvent(item: SharePointListItem, projectId: string): TaskEvent | null {
   if (item.deleted) return null;
 
+  const map = getFieldMap();
   const fields = item.fields ?? {};
   const created = item.createdDateTime ? Date.parse(item.createdDateTime) : 0;
   const modified = item.lastModifiedDateTime ? Date.parse(item.lastModifiedDateTime) : created;
   const eventType = created && modified - created < CREATED_EVENT_WINDOW_MS ? "task_created" : "task_updated";
+
+  const assignedTo =
+    fieldToString(fields[map.assignedTo]) ?? fieldToString(fields[`${map.assignedTo}LookupId`]);
+  const estimatedHours = fields[map.estimatedHours];
+  const loggedHours = fields[map.loggedHours];
+  const tags = fieldToString(fields[map.tags]);
 
   return {
     eventId: uuidv4(),
@@ -148,12 +199,12 @@ export function mapListItemToTaskEvent(item: SharePointListItem, projectId: stri
     source: "sharepoint",
     task: {
       id: item.id,
-      title: String(fields["Title"] ?? "Untitled"),
-      description: String(fields["Description"] ?? ""),
-      assignedTo: fields["AssignedTo"] ? String(fields["AssignedTo"]) : undefined,
-      estimatedHours: fields["EstimatedHours"] ? Number(fields["EstimatedHours"]) : undefined,
-      loggedHours: fields["LoggedHours"] ? Number(fields["LoggedHours"]) : undefined,
-      tags: fields["Tags"] ? String(fields["Tags"]).split(";").map((t) => t.trim()) : [],
+      title: fieldToString(fields[map.title]) ?? "Untitled",
+      description: fieldToString(fields[map.description]) ?? "",
+      assignedTo,
+      estimatedHours: estimatedHours != null ? Number(estimatedHours) : undefined,
+      loggedHours: loggedHours != null ? Number(loggedHours) : undefined,
+      tags: tags ? tags.split(";").map((t) => t.trim()).filter(Boolean) : [],
     },
     rawPayload: item as unknown as Record<string, unknown>,
   };

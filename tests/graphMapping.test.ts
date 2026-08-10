@@ -62,4 +62,29 @@ describe("mapListItemToTaskEvent", () => {
     expect(event).not.toBeNull();
     expect(event!.task.title).toBe("Untitled");
   });
+
+  it("respects TASK_FIELD_MAP overrides (ProjektPoint-style lists)", () => {
+    process.env.TASK_FIELD_MAP = JSON.stringify({
+      description: "Remarks",
+      assignedTo: "Employee",
+      estimatedHours: "Hours",
+    });
+    try {
+      const item: SharePointListItem = {
+        id: "9",
+        fields: {
+          Title: "Opsæt integration",
+          Remarks: "Integration til TimeLog",
+          Employee: { displayName: "Jane Doe", email: "jd@x.dk" },
+          Hours: 8,
+        },
+      };
+      const event = mapListItemToTaskEvent(item, "proj-1");
+      expect(event!.task.description).toBe("Integration til TimeLog");
+      expect(event!.task.assignedTo).toBe("Jane Doe");
+      expect(event!.task.estimatedHours).toBe(8);
+    } finally {
+      delete process.env.TASK_FIELD_MAP;
+    }
+  });
 });
