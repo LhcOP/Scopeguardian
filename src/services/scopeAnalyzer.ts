@@ -12,6 +12,7 @@ import {
 } from "./cosmosDbService";
 import { buildViolationAlertCard } from "../utils/adaptiveCardBuilder";
 import { sendTeamsAlert } from "./teamsNotifier";
+import { sendViolationEmail } from "./emailNotifier";
 import { selectItemsWithinBudget } from "../utils/tokenOptimizer";
 import { computeRiskScore } from "../utils/riskScore";
 
@@ -57,8 +58,11 @@ export async function analyzeTaskEvent(
   for (const violation of violations) {
     await upsertViolation(violation);
     context.log(`Violation detected: ${violation.violationId} (${violation.severity})`);
-    const card = buildViolationAlertCard(violation, scope.projectName);
-    await sendTeamsAlert(teamsChannelId, card, context);
+    if (teamsChannelId) {
+      const card = buildViolationAlertCard(violation, scope.projectName);
+      await sendTeamsAlert(teamsChannelId, card, context);
+    }
+    await sendViolationEmail(violation, scope.projectName, context);
   }
 
   if (violations.length > 0) {

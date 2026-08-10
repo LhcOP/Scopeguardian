@@ -22,7 +22,7 @@ function getCredential(): TokenCredential {
   return new DefaultAzureCredential();
 }
 
-function getGraphClient(): Client {
+export function getGraphClient(): Client {
   if (!graphClient) {
     const authProvider = new TokenCredentialAuthenticationProvider(getCredential(), {
       scopes: GRAPH_SCOPES,

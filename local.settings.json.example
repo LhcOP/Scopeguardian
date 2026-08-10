@@ -34,6 +34,9 @@
     "PROJECT_CONFIGS": "project-001:<sharepoint-site-id>:<list-id>,project-002:<site-id>:<list-id>",
     "DEFAULT_PROJECT_ID": "project-001",
 
-    "TEAMS_CHANNEL_ID": "<teams-channel-id e.g. 19:...@thread.tacv2>"
+    "TEAMS_CHANNEL_ID": "<teams-channel-id e.g. 19:...@thread.tacv2 — empty disables Teams alerts>",
+
+    "ALERT_EMAIL_FROM": "<sender-mailbox-upn — requires Mail.Send application permission>",
+    "ALERT_EMAIL_TO": "<recipient1@company.com,recipient2@company.com — empty disables email alerts>"
   }
 }
