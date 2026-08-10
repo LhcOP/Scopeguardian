@@ -25,7 +25,6 @@
     "uuid": "^10.0.0"
   },
   "devDependencies": {
-    "@azure/functions": "^4.5.0",
     "@types/jest": "^29.5.12",
     "@types/node": "^20.14.10",
     "@types/uuid": "^10.0.0",
