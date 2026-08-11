@@ -112,12 +112,16 @@ Judge severity primarily on hours, deadlines and progress. These rules are BINDI
 - Monetary amounts alone are NOT the signal — translate everything to hours/deadline/progress impact.
 Use the TASK EVENT numbers (including CHANGES previous → current) as the factual basis, not just the aggregated analysis prose.
 
-Respond with a JSON array of violations (can be empty). Each violation:
+Always respond with a JSON object of exactly this shape (violations may be empty):
 {
-  "severity": "low"|"medium"|"high"|"critical",
-  "reasoning": "string",
-  "affectedScopeItems": ["id1","id2"],
-  "suggestedAction": "string"
+  "violations": [
+    {
+      "severity": "low"|"medium"|"high"|"critical",
+      "reasoning": "string",
+      "affectedScopeItems": ["id1","id2"],
+      "suggestedAction": "string"
+    }
+  ]
 }
 Only include real violations, not hypothetical concerns.`;
 
@@ -134,16 +138,7 @@ Only include real violations, not hypothetical concerns.`;
     ],
   });
 
-  type ViolationResult = {
-    violations?: {
-      severity: ScopeViolation["severity"];
-      reasoning: string;
-      affectedScopeItems: string[];
-      suggestedAction: string;
-    }[];
-  };
-  const parsed = JSON.parse(response.choices[0].message.content ?? "{}") as ViolationResult;
-  const raw = parsed.violations ?? [];
+  const raw = parseViolationPayload(response.choices[0].message.content ?? "{}");
 
   return raw.map((v) => ({
     violationId: uuidv4(),
@@ -158,6 +153,51 @@ Only include real violations, not hypothetical concerns.`;
     suggestedAction: v.suggestedAction,
     status: "pending",
   }));
+}
+
+export interface RawViolation {
+  severity: ScopeViolation["severity"];
+  reasoning: string;
+  affectedScopeItems: string[];
+  suggestedAction: string;
+}
+
+const VALID_SEVERITIES = new Set(["low", "medium", "high", "critical"]);
+
+/**
+ * Tolerant parser for the reduce model's response. With response_format
+ * json_object the model cannot return a bare array, so it variously returns
+ * {"violations":[...]}, a single violation object, or an array — accept all.
+ */
+export function parseViolationPayload(content: string): RawViolation[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return [];
+  }
+
+  let candidates: unknown[];
+  if (Array.isArray(parsed)) {
+    candidates = parsed;
+  } else if (parsed && typeof parsed === "object") {
+    const obj = parsed as Record<string, unknown>;
+    if (Array.isArray(obj.violations)) {
+      candidates = obj.violations;
+    } else {
+      candidates = [obj]; // single violation object without wrapper
+    }
+  } else {
+    return [];
+  }
+
+  return candidates.filter(
+    (v): v is RawViolation =>
+      !!v &&
+      typeof v === "object" &&
+      VALID_SEVERITIES.has(String((v as Record<string, unknown>).severity)) &&
+      typeof (v as Record<string, unknown>).reasoning === "string"
+  );
 }
 
 // ── Scope Summary Generation ───────────────────────────────────────────────────
