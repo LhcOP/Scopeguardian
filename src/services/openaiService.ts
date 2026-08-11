@@ -56,8 +56,8 @@ export async function detectScopeViolations(
 
   const combinedAnalysis = mapResults.join("\n\n---\n\n");
 
-  // REDUCE: synthesise findings with GPT-4o
-  return reduceToViolations(combinedAnalysis, taskEvent, relevantScopeItems.map((i) => i.id));
+  // REDUCE: synthesise findings with the full chat model
+  return reduceToViolations(combinedAnalysis, taskContext, taskEvent, relevantScopeItems.map((i) => i.id));
 }
 
 async function mapAnalysis(scopeChunk: string, taskContext: string): Promise<string> {
@@ -91,6 +91,7 @@ async function mapAnalysis(scopeChunk: string, taskContext: string): Promise<str
 
 async function reduceToViolations(
   mapOutput: string,
+  taskContext: string,
   taskEvent: TaskEvent,
   scopeItemIds: string[]
 ): Promise<ScopeViolation[]> {
@@ -103,11 +104,13 @@ Given aggregated analysis of a task event against project scope, determine:
 3. Which scope item IDs are affected.
 4. A clear, actionable recommendation.
 
-Judge severity primarily on hours, deadlines and progress:
-- Logged/registered hours exceeding estimated hours, or significant estimate growth → violation (severity scales with the relative overrun).
-- Deadlines moved later, especially on required tasks → violation.
+Judge severity primarily on hours, deadlines and progress. These rules are BINDING — when a threshold is met, report the violation even if it could also be read as a planning correction:
+- Estimated hours grown ≥50% or by ≥8 hours versus the previous value → violation (medium; high when growth is ≥100% AND ≥16 hours).
+- Logged/registered hours exceeding estimated hours → violation (medium; high when overrun ≥50%).
+- Deadline moved later → violation (medium; high on required tasks or slips over a week).
 - Work matching the OUT OF SCOPE list or not covered by any scope item → violation (high or critical).
 - Monetary amounts alone are NOT the signal — translate everything to hours/deadline/progress impact.
+Use the TASK EVENT numbers (including CHANGES previous → current) as the factual basis, not just the aggregated analysis prose.
 
 Respond with a JSON array of violations (can be empty). Each violation:
 {
@@ -118,7 +121,7 @@ Respond with a JSON array of violations (can be empty). Each violation:
 }
 Only include real violations, not hypothetical concerns.`;
 
-  const userPrompt = `AGGREGATED MAP ANALYSIS:\n${mapOutput}\n\nTASK ID: ${taskEvent.task.id}\nTASK TITLE: ${taskEvent.task.title}\nAVAILABLE SCOPE ITEM IDS: ${scopeItemIds.join(", ")}`;
+  const userPrompt = `TASK EVENT:\n${taskContext}\n\nAGGREGATED MAP ANALYSIS:\n${mapOutput}\n\nTASK ID: ${taskEvent.task.id}\nAVAILABLE SCOPE ITEM IDS: ${scopeItemIds.join(", ")}`;
 
   const response = await client.chat.completions.create({
     model: FULL_MODEL,
