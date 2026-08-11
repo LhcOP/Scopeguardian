@@ -128,20 +128,44 @@ export async function primeListItemDelta(siteId: string, listId: string): Promis
 
 // ── Generic List/Drive Access (scope bootstrapping) ──────────────────────────
 
-/** Fetches items (fields only) from a list addressed by display name or id. */
+const MAX_LIST_PAGES = 10;
+
+/** Fetches items (fields only) from a list addressed by display name or id, following paging. */
 export async function getListItemFields(
   siteId: string,
   listNameOrId: string,
-  filter?: string
+  filter?: string,
+  allowNonIndexedFilter = false
 ): Promise<Record<string, unknown>[]> {
   const client = getGraphClient();
   let request = client
     .api(`/sites/${siteId}/lists/${encodeURIComponent(listNameOrId)}/items`)
     .expand("fields")
-    .top(100);
+    .top(200);
   if (filter) request = request.filter(filter);
-  const page = (await request.get()) as { value?: { fields?: Record<string, unknown> }[] };
-  return (page.value ?? []).map((i) => i.fields ?? {});
+  if (allowNonIndexedFilter) {
+    request = request.header("Prefer", "HonorNonIndexedQueriesWarningMayFailRandomly");
+  }
+
+  type ItemsPage = { value?: { fields?: Record<string, unknown> }[]; "@odata.nextLink"?: string };
+  const results: Record<string, unknown>[] = [];
+  let page = (await request.get()) as ItemsPage;
+  for (let i = 0; i < MAX_LIST_PAGES; i++) {
+    results.push(...(page.value ?? []).map((item) => item.fields ?? {}));
+    const next = page["@odata.nextLink"];
+    if (!next) break;
+    page = (await client.api(next).get()) as ItemsPage;
+  }
+  return results;
+}
+
+/** Lists all lists on a site (id + display name). */
+export async function getSiteLists(siteId: string): Promise<{ id: string; displayName: string }[]> {
+  const client = getGraphClient();
+  const page = (await client.api(`/sites/${siteId}/lists`).select("id,displayName").top(200).get()) as {
+    value?: { id: string; displayName: string }[];
+  };
+  return page.value ?? [];
 }
 
 export interface DriveFileHit {

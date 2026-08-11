@@ -16,6 +16,7 @@ import { sendTeamsAlert } from "./teamsNotifier";
 import { sendViolationEmail } from "./emailNotifier";
 import { selectItemsWithinBudget } from "../utils/tokenOptimizer";
 import { computeRiskScore } from "../utils/riskScore";
+import { getRegisteredHours } from "./timeTrackingService";
 
 const MAX_SCOPE_ITEMS_TOKENS = 4000;
 
@@ -46,6 +47,20 @@ export async function analyzeTaskEvent(
   context: InvocationContext
 ): Promise<number> {
   const { projectId } = taskEvent;
+
+  // Enrich with actual registered hours from the central time-tracking hub —
+  // the task list itself carries no logged hours in ProjektPoint setups.
+  if (taskEvent.task.loggedHours == null) {
+    const registered = await getRegisteredHours(projectId, taskEvent.task.title, context).catch(
+      () => null
+    );
+    if (registered && registered.taskHours > 0) {
+      taskEvent.task.loggedHours = registered.taskHours;
+      context.log(
+        `Registered hours for "${taskEvent.task.title}": ${registered.taskHours} (project total: ${registered.projectHours})`
+      );
+    }
+  }
 
   // Diff against the previous version of this task so the analysis sees what
   // actually changed — hour growth, deadline slips and status transitions are

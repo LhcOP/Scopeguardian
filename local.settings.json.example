@@ -41,6 +41,9 @@
 
     "PROJECTS_HUB_SITE_ID": "<graph-site-id of the hub containing the Projects register — enables auto scope generation>",
     "PROJECTS_HUB_LIST": "Projects",
-    "SCOPE_DOC_SEARCH": "estimat"
+    "SCOPE_DOC_SEARCH": "estimat",
+
+    "TIMETRACK_SITE_ID": "<graph-site-id of the time-tracking hub — enables registered-hours signals>",
+    "TIMETRACK_LIST_PREFIX": "Tidsreg"
   }
 }
