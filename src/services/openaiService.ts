@@ -1,5 +1,5 @@
 import { AzureOpenAI } from "openai";
-import { ScopeItem, ScopeViolation } from "../models/ProjectScope";
+import { ProjectScope, ScopeItem, ScopeViolation } from "../models/ProjectScope";
 import { TaskEvent } from "../models/TaskEvent";
 import { countTokens } from "../utils/tokenOptimizer";
 import { v4 as uuidv4 } from "uuid";
@@ -203,6 +203,80 @@ export function parseViolationPayload(content: string): RawViolation[] {
       VALID_SEVERITIES.has(String((v as Record<string, unknown>).severity)) &&
       typeof (v as Record<string, unknown>).reasoning === "string"
   );
+}
+
+// ── Automatic Scope Generation ────────────────────────────────────────────────
+
+/**
+ * Generates a master scope from the project's own material (project
+ * description, quote lines, estimation-basis documents). Returns null when
+ * the material is insufficient to derive a meaningful scope.
+ */
+export async function generateScopeFromMaterial(
+  projectId: string,
+  projectName: string,
+  material: string
+): Promise<ProjectScope | null> {
+  const client = getClient();
+
+  const systemPrompt = `You are a project scoping analyst. From the provided project material
+(project description, quote lines, estimation-basis documents) produce a master scope used for
+automated scope-creep detection. Rules:
+- Derive scope items ONLY from what the material actually covers — do not invent deliverables.
+- Each scope item gets a short stable id (S1, S2, ...), title, description, deliverables and
+  acceptance criteria; include estimatedHours when the material states hours per item.
+- Put explicit exclusions from the material into outOfScope. Additionally add outOfScope entries
+  for adjacent work the material clearly does NOT include (e.g. if the material describes
+  configuration only, custom development is out of scope) — be conservative.
+- Keep the content language of the source material (e.g. Danish stays Danish).
+- If the material is too thin to derive at least one concrete scope item, respond {"insufficient": true}.
+
+Respond with JSON:
+{"projectName": "string", "scopeItems": [{"id","title","description","deliverables":[],"acceptanceCriteria":[],"estimatedHours":number|null,"tags":[]}], "outOfScope":[], "assumptions":[], "constraints":[]}`;
+
+  const response = await client.chat.completions.create({
+    model: FULL_MODEL,
+    temperature: 0,
+    max_tokens: 4096,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `PROJECT: ${projectName} (${projectId})\n\nMATERIAL:\n${material}` },
+    ],
+  });
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(response.choices[0].message.content ?? "{}") as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (parsed.insufficient === true) return null;
+
+  const items = Array.isArray(parsed.scopeItems) ? (parsed.scopeItems as Partial<ScopeItem>[]) : [];
+  const validItems = items.filter((i) => i?.id && i?.title && i?.description);
+  if (validItems.length === 0) return null;
+
+  const now = new Date().toISOString();
+  return {
+    projectId,
+    projectName: typeof parsed.projectName === "string" && parsed.projectName ? parsed.projectName : projectName,
+    version: "1",
+    createdAt: now,
+    updatedAt: now,
+    scopeItems: validItems.map((i) => ({
+      id: String(i.id),
+      title: String(i.title),
+      description: String(i.description),
+      deliverables: Array.isArray(i.deliverables) ? i.deliverables.map(String) : [],
+      acceptanceCriteria: Array.isArray(i.acceptanceCriteria) ? i.acceptanceCriteria.map(String) : [],
+      estimatedHours: typeof i.estimatedHours === "number" ? i.estimatedHours : undefined,
+      tags: Array.isArray(i.tags) ? i.tags.map(String) : [],
+    })),
+    outOfScope: Array.isArray(parsed.outOfScope) ? parsed.outOfScope.map(String) : [],
+    assumptions: Array.isArray(parsed.assumptions) ? parsed.assumptions.map(String) : [],
+    constraints: Array.isArray(parsed.constraints) ? parsed.constraints.map(String) : [],
+  };
 }
 
 // ── Scope Summary Generation ───────────────────────────────────────────────────

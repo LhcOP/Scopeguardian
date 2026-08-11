@@ -5,6 +5,7 @@ import { ensureIndexExists, upsertScopeItems, deleteScopeItemsByProject } from "
 import { upsertScopeSummary, listViolations } from "../services/cosmosDbService";
 import { parseProjectConfigs } from "../utils/projectConfig";
 import { computeRiskScore } from "../utils/riskScore";
+import { bootstrapMasterScope } from "../services/scopeBootstrapper";
 
 /**
  * Timer-triggered function — runs every 6 hours.
@@ -14,18 +15,23 @@ async function syncMasterScopeHandler(_timer: Timer, context: InvocationContext)
   context.log(`SyncMasterScope triggered at ${new Date().toISOString()}`);
   await ensureIndexExists();
 
-  const projectIds = parseProjectConfigs().map((c) => c.projectId);
-  if (projectIds.length === 0) {
+  const configs = parseProjectConfigs();
+  if (configs.length === 0) {
     context.warn("PROJECT_CONFIGS is empty — nothing to sync");
     return;
   }
 
-  for (const projectId of projectIds) {
+  for (const config of configs) {
+    const projectId = config.projectId;
     context.log(`Syncing master scope for project: ${projectId}`);
     try {
-      const scope = await downloadMasterScope(projectId);
+      let scope = await downloadMasterScope(projectId);
       if (!scope) {
-        context.warn(`No scope found for project ${projectId} — skipping`);
+        // Auto-generate from project material — no consultant involvement
+        scope = await bootstrapMasterScope(projectId, config.siteId, context);
+      }
+      if (!scope) {
+        context.warn(`No scope and no material for project ${projectId} — skipping`);
         continue;
       }
 

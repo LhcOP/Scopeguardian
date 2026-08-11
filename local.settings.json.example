@@ -37,6 +37,10 @@
     "TEAMS_CHANNEL_ID": "<teams-channel-id e.g. 19:...@thread.tacv2 — empty disables Teams alerts>",
 
     "ALERT_EMAIL_FROM": "<sender-mailbox-upn — requires Mail.Send application permission>",
-    "ALERT_EMAIL_TO": "<recipient1@company.com,recipient2@company.com — empty disables email alerts>"
+    "ALERT_EMAIL_TO": "<recipient1@company.com,recipient2@company.com — empty disables email alerts>",
+
+    "PROJECTS_HUB_SITE_ID": "<graph-site-id of the hub containing the Projects register — enables auto scope generation>",
+    "PROJECTS_HUB_LIST": "Projects",
+    "SCOPE_DOC_SEARCH": "estimat"
   }
 }

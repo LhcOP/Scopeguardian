@@ -21,8 +21,11 @@
     "@azure/storage-blob": "^12.24.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "botbuilder": "^4.23.0",
+    "mammoth": "^1.12.1",
     "openai": "^4.52.0",
-    "uuid": "^10.0.0"
+    "pdf-parse": "^2.4.5",
+    "uuid": "^10.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",

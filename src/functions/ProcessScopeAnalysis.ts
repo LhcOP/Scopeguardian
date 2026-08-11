@@ -12,6 +12,8 @@ import {
   mapListItemToTaskEvent,
 } from "../services/graphService";
 import { analyzeTaskEvent } from "../services/scopeAnalyzer";
+import { bootstrapMasterScope } from "../services/scopeBootstrapper";
+import { downloadMasterScope } from "../services/blobStorageService";
 
 /**
  * Queue-triggered worker — runs the delta query for the notified list,
@@ -46,6 +48,11 @@ async function processScopeAnalysisHandler(
 
   const { items, deltaLink } = await fetchListItemDelta(msg.siteId, msg.listId, record.deltaLink);
   context.log(`Delta returned ${items.length} changed item(s) for project ${msg.projectId}`);
+
+  // Auto-generate the master scope from project material on first activity
+  if (items.length > 0 && !(await downloadMasterScope(msg.projectId))) {
+    await bootstrapMasterScope(msg.projectId, msg.siteId, context);
+  }
 
   let analyzed = 0;
   let violations = 0;

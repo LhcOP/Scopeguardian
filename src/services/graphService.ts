@@ -1,4 +1,4 @@
-import { Client } from "@microsoft/microsoft-graph-client";
+import { Client, ResponseType } from "@microsoft/microsoft-graph-client";
 import { ClientSecretCredential, DefaultAzureCredential, TokenCredential } from "@azure/identity";
 import { TokenCredentialAuthenticationProvider } from "@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials";
 import { TaskEvent } from "../models/TaskEvent";
@@ -124,6 +124,66 @@ export async function primeListItemDelta(siteId: string, listId: string): Promis
     .api(`/sites/${siteId}/lists/${listId}/items/delta?token=latest`)
     .get()) as DeltaPage;
   return page["@odata.deltaLink"] ?? null;
+}
+
+// ── Generic List/Drive Access (scope bootstrapping) ──────────────────────────
+
+/** Fetches items (fields only) from a list addressed by display name or id. */
+export async function getListItemFields(
+  siteId: string,
+  listNameOrId: string,
+  filter?: string
+): Promise<Record<string, unknown>[]> {
+  const client = getGraphClient();
+  let request = client
+    .api(`/sites/${siteId}/lists/${encodeURIComponent(listNameOrId)}/items`)
+    .expand("fields")
+    .top(100);
+  if (filter) request = request.filter(filter);
+  const page = (await request.get()) as { value?: { fields?: Record<string, unknown> }[] };
+  return (page.value ?? []).map((i) => i.fields ?? {});
+}
+
+export interface DriveFileHit {
+  driveId: string;
+  itemId: string;
+  name: string;
+  size: number;
+}
+
+/** Searches all document libraries on a site for files matching the query. */
+export async function searchProjectFiles(siteId: string, query: string): Promise<DriveFileHit[]> {
+  const client = getGraphClient();
+  const drives = (await client.api(`/sites/${siteId}/drives`).get()) as {
+    value?: { id: string }[];
+  };
+
+  const hits: DriveFileHit[] = [];
+  for (const drive of drives.value ?? []) {
+    try {
+      const results = (await client
+        .api(`/drives/${drive.id}/root/search(q='${query.replace(/'/g, "''")}')`)
+        .top(10)
+        .get()) as { value?: { id: string; name: string; size?: number; file?: unknown }[] };
+      for (const item of results.value ?? []) {
+        if (item.file) {
+          hits.push({ driveId: drive.id, itemId: item.id, name: item.name, size: item.size ?? 0 });
+        }
+      }
+    } catch {
+      // Drive not searchable — skip
+    }
+  }
+  return hits;
+}
+
+export async function downloadDriveItemContent(driveId: string, itemId: string): Promise<Buffer> {
+  const client = getGraphClient();
+  const data = (await client
+    .api(`/drives/${driveId}/items/${itemId}/content`)
+    .responseType(ResponseType.ARRAYBUFFER)
+    .get()) as ArrayBuffer;
+  return Buffer.from(data);
 }
 
 // ── List Item → TaskEvent Mapping ────────────────────────────────────────────

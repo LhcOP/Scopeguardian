@@ -10,6 +10,8 @@ import {
   primeListItemDelta,
 } from "../services/graphService";
 import { parseProjectConfigs } from "../utils/projectConfig";
+import { bootstrapMasterScope } from "../services/scopeBootstrapper";
+import { downloadMasterScope } from "../services/blobStorageService";
 
 const SUBSCRIPTION_LIFETIME_MS = 3 * 24 * 3_600_000;
 const RENEWAL_WINDOW_MS = 24 * 3_600_000;
@@ -79,6 +81,15 @@ async function graphSubscriptionManagerHandler(_timer: Timer, context: Invocatio
       };
       await upsertSubscriptionRecord(record);
       context.log(`Created new subscription for project ${config.projectId}: ${subscriptionId}`);
+
+      // Fully automatic onboarding: generate master scope from project material
+      if (!(await downloadMasterScope(config.projectId))) {
+        try {
+          await bootstrapMasterScope(config.projectId, config.siteId, context);
+        } catch (scopeErr) {
+          context.error(`Scope bootstrap failed for project ${config.projectId}:`, scopeErr);
+        }
+      }
     } catch (err) {
       context.error(`Failed to create subscription for project ${config.projectId}:`, err);
     }
