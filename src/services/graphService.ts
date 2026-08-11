@@ -134,6 +134,8 @@ export interface TaskFieldMap {
   assignedTo: string;
   estimatedHours: string;
   loggedHours: string;
+  deadline: string;
+  status: string;
   tags: string;
 }
 
@@ -143,6 +145,8 @@ const DEFAULT_FIELD_MAP: TaskFieldMap = {
   assignedTo: "AssignedTo",
   estimatedHours: "EstimatedHours",
   loggedHours: "LoggedHours",
+  deadline: "Deadline",
+  status: "Status",
   tags: "Tags",
 };
 
@@ -204,6 +208,8 @@ export function mapListItemToTaskEvent(item: SharePointListItem, projectId: stri
       assignedTo,
       estimatedHours: estimatedHours != null ? Number(estimatedHours) : undefined,
       loggedHours: loggedHours != null ? Number(loggedHours) : undefined,
+      deadline: fieldToString(fields[map.deadline]),
+      status: fieldToString(fields[map.status]),
       tags: tags ? tags.split(";").map((t) => t.trim()).filter(Boolean) : [],
     },
     rawPayload: item as unknown as Record<string, unknown>,

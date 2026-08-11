@@ -6,6 +6,7 @@ import { vectorSearch } from "./aiSearchService";
 import { embedText, detectScopeViolations } from "./openaiService";
 import {
   insertTaskEvent,
+  getLastTaskEventForTask,
   upsertViolation,
   upsertScopeSummary,
   listViolations,
@@ -18,6 +19,23 @@ import { computeRiskScore } from "../utils/riskScore";
 
 const MAX_SCOPE_ITEMS_TOKENS = 4000;
 
+const DIFF_FIELDS = ["title", "estimatedHours", "loggedHours", "deadline", "status", "description"] as const;
+
+function diffTasks(
+  prev: TaskEvent["task"],
+  current: TaskEvent["task"]
+): NonNullable<TaskEvent["changeDetails"]> {
+  const changes: NonNullable<TaskEvent["changeDetails"]> = [];
+  for (const field of DIFF_FIELDS) {
+    const oldValue = prev[field] != null ? String(prev[field]) : null;
+    const newValue = current[field] != null ? String(current[field]) : null;
+    if (oldValue !== newValue) {
+      changes.push({ field, oldValue, newValue });
+    }
+  }
+  return changes;
+}
+
 /**
  * Core analysis pipeline: persists the event, finds the relevant scope items
  * via vector search, runs violation detection, alerts Teams, and refreshes
@@ -28,6 +46,14 @@ export async function analyzeTaskEvent(
   context: InvocationContext
 ): Promise<number> {
   const { projectId } = taskEvent;
+
+  // Diff against the previous version of this task so the analysis sees what
+  // actually changed — hour growth, deadline slips and status transitions are
+  // the primary scope-creep signals.
+  const previous = await getLastTaskEventForTask(projectId, taskEvent.task.id);
+  if (previous) {
+    taskEvent.changeDetails = diffTasks(previous.task, taskEvent.task);
+  }
 
   await insertTaskEvent(taskEvent);
 

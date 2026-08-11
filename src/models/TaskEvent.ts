@@ -19,6 +19,8 @@ export interface TaskEvent {
     assignedTo?: string;
     estimatedHours?: number;
     loggedHours?: number;
+    deadline?: string;
+    status?: string;
     tags?: string[];
     parentTaskId?: string;
     comments?: string[];

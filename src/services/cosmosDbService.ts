@@ -111,6 +111,24 @@ export async function insertTaskEvent(event: TaskEvent): Promise<void> {
   await container.items.create({ ...event, id: event.eventId });
 }
 
+/** Latest stored event for a specific task — used to diff hour/deadline/status changes. */
+export async function getLastTaskEventForTask(
+  projectId: string,
+  taskId: string
+): Promise<TaskEvent | null> {
+  const container = await getContainer(CONTAINERS.taskEvents);
+  const { resources } = await container.items
+    .query<TaskEvent>({
+      query: `SELECT TOP 1 * FROM c WHERE c.projectId = @pid AND c.task.id = @tid ORDER BY c.occurredAt DESC`,
+      parameters: [
+        { name: "@pid", value: projectId },
+        { name: "@tid", value: taskId },
+      ],
+    })
+    .fetchAll();
+  return resources[0] ?? null;
+}
+
 export async function getRecentTaskEvents(projectId: string, hours = 24): Promise<TaskEvent[]> {
   const container = await getContainer(CONTAINERS.taskEvents);
   const since = new Date(Date.now() - hours * 3_600_000).toISOString();

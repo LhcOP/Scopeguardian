@@ -70,9 +70,15 @@ async function mapAnalysis(scopeChunk: string, taskContext: string): Promise<str
       {
         role: "system",
         content:
-          "You are a project scope analyst. Given a portion of the project scope and a task event, " +
-          "identify any potential scope creep indicators. Be concise. Output JSON with fields: " +
-          '{"potentialCreep": boolean, "indicators": string[], "outOfScopeMatch": boolean, "notes": string}',
+          "You are a project scope and delivery analyst. Given a portion of the project scope and a task event, " +
+          "identify scope creep and delivery-risk indicators. Prioritise these signals: " +
+          "(1) work not covered by the scope items or matching the OUT OF SCOPE list, " +
+          "(2) estimated hours increased compared to the previous value (see CHANGES), " +
+          "(3) logged/registered hours exceeding the estimated hours, " +
+          "(4) deadlines moved later than before, " +
+          "(5) status/progress anomalies such as work started on tasks outside scope. " +
+          "Monetary amounts are context only — hours, deadlines and progress are the primary signals. Be concise. " +
+          'Output JSON: {"potentialCreep": boolean, "indicators": string[], "outOfScopeMatch": boolean, "hourOverrun": boolean, "deadlineSlip": boolean, "notes": string}',
       },
       {
         role: "user",
@@ -90,12 +96,18 @@ async function reduceToViolations(
 ): Promise<ScopeViolation[]> {
   const client = getClient();
 
-  const systemPrompt = `You are a senior project manager AI specialising in scope management.
+  const systemPrompt = `You are a senior project manager AI specialising in scope and delivery management.
 Given aggregated analysis of a task event against project scope, determine:
-1. Whether this constitutes a genuine scope violation.
+1. Whether this constitutes a genuine scope violation or delivery risk.
 2. The severity (low/medium/high/critical).
 3. Which scope item IDs are affected.
 4. A clear, actionable recommendation.
+
+Judge severity primarily on hours, deadlines and progress:
+- Logged/registered hours exceeding estimated hours, or significant estimate growth → violation (severity scales with the relative overrun).
+- Deadlines moved later, especially on required tasks → violation.
+- Work matching the OUT OF SCOPE list or not covered by any scope item → violation (high or critical).
+- Monetary amounts alone are NOT the signal — translate everything to hours/deadline/progress impact.
 
 Respond with a JSON array of violations (can be empty). Each violation:
 {
@@ -190,13 +202,20 @@ function buildScopeContext(items: ScopeItem[], outOfScope: string[]): string {
 }
 
 function buildTaskContext(event: TaskEvent): string {
+  const changes = event.changeDetails?.length
+    ? "CHANGES (previous → current):\n" +
+      event.changeDetails.map((c) => `  ${c.field}: ${c.oldValue ?? "(empty)"} → ${c.newValue ?? "(empty)"}`).join("\n")
+    : "";
   return [
     `Event Type: ${event.eventType}`,
     `Task: ${event.task.title}`,
     `Description: ${event.task.description}`,
-    event.task.tags?.length ? `Tags: ${event.task.tags.join(", ")}` : "",
+    event.task.status ? `Status: ${event.task.status}` : "",
     event.task.estimatedHours != null ? `Estimated Hours: ${event.task.estimatedHours}` : "",
-    event.changeDetails?.map((c) => `Changed ${c.field}: ${c.oldValue} → ${c.newValue}`).join("\n") ?? "",
+    event.task.loggedHours != null ? `Logged/Registered Hours: ${event.task.loggedHours}` : "",
+    event.task.deadline ? `Deadline: ${event.task.deadline}` : "",
+    event.task.tags?.length ? `Tags: ${event.task.tags.join(", ")}` : "",
+    changes,
   ]
     .filter(Boolean)
     .join("\n");
