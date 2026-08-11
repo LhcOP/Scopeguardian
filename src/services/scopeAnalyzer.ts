@@ -3,7 +3,7 @@ import { TaskEvent } from "../models/TaskEvent";
 import { ScopeItem } from "../models/ProjectScope";
 import { downloadMasterScope } from "./blobStorageService";
 import { vectorSearch } from "./aiSearchService";
-import { embedText, detectScopeViolations } from "./openaiService";
+import { embedText, detectScopeViolations, detectScopeViolationsInDocument } from "./openaiService";
 import {
   insertTaskEvent,
   getLastTaskEventForTask,
@@ -99,6 +99,73 @@ export async function analyzeTaskEvent(
   for (const violation of violations) {
     await upsertViolation(violation);
     context.log(`Violation detected: ${violation.violationId} (${violation.severity})`);
+    if (teamsChannelId) {
+      const card = buildViolationAlertCard(violation, scope.projectName);
+      await sendTeamsAlert(teamsChannelId, card, context);
+    }
+    await sendViolationEmail(violation, scope.projectName, context);
+  }
+
+  if (violations.length > 0) {
+    const pending = await listViolations(projectId, "pending");
+    await upsertScopeSummary({
+      projectId,
+      projectName: scope.projectName,
+      totalItems: scope.scopeItems.length,
+      lastAnalyzedAt: new Date().toISOString(),
+      violationCount: pending.length,
+      riskScore: computeRiskScore(pending),
+    });
+  }
+
+  return violations.length;
+}
+
+/**
+ * Analyses a document added to the project (email, minutes, requirement doc)
+ * against the master scope. Persists the event, alerts on violations, and
+ * refreshes the summary — mirrors analyzeTaskEvent for document content.
+ */
+export async function analyzeDocumentEvent(
+  taskEvent: TaskEvent,
+  documentText: string,
+  context: InvocationContext
+): Promise<number> {
+  const { projectId } = taskEvent;
+
+  await insertTaskEvent(taskEvent);
+
+  const scope = await downloadMasterScope(projectId);
+  if (!scope) {
+    context.warn(`No master scope found for project ${projectId} — skipping document analysis`);
+    return 0;
+  }
+
+  // Vector search on the document excerpt to find the most relevant scope items
+  const queryText = `${taskEvent.task.title} ${documentText.slice(0, 2000)}`;
+  const [queryVector] = await embedText([queryText]);
+  const searchHits = await vectorSearch(projectId, queryVector, 10);
+  const relevantIds = new Set(searchHits.map((h) => h.item.id?.replace(`${projectId}-`, "")));
+
+  let relevantItems = scope.scopeItems.filter((i) => relevantIds.has(i.id));
+  if (relevantItems.length === 0) relevantItems = scope.scopeItems.slice(0, 5);
+  const selectedItems = selectItemsWithinBudget<ScopeItem>(
+    relevantItems,
+    (i) => `${i.title} ${i.description} ${i.deliverables.join(" ")}`,
+    MAX_SCOPE_ITEMS_TOKENS
+  );
+
+  const violations = await detectScopeViolationsInDocument(
+    taskEvent,
+    documentText,
+    selectedItems,
+    scope.outOfScope
+  );
+
+  const teamsChannelId = process.env.TEAMS_CHANNEL_ID ?? "";
+  for (const violation of violations) {
+    await upsertViolation(violation);
+    context.log(`Document violation detected: ${violation.violationId} (${violation.severity})`);
     if (teamsChannelId) {
       const card = buildViolationAlertCard(violation, scope.projectName);
       await sendTeamsAlert(teamsChannelId, card, context);

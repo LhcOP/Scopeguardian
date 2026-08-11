@@ -57,6 +57,27 @@ export async function createSharePointSubscription(
   return subscription.id;
 }
 
+/**
+ * Creates a Graph change subscription on a document library (drive).
+ * Same constraints as lists: changeType "updated" only, no resourceData —
+ * changed files are discovered via drive delta queries.
+ */
+export async function createDriveSubscription(
+  driveId: string,
+  notificationUrl: string
+): Promise<string> {
+  const client = getGraphClient();
+  const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+  const subscription = (await client.api("/subscriptions").post({
+    changeType: "updated",
+    notificationUrl,
+    resource: `/drives/${driveId}/root`,
+    expirationDateTime: expiresAt,
+    clientState: process.env.WEBHOOK_CLIENT_STATE ?? "scopeguardian-secret",
+  })) as { id: string };
+  return subscription.id;
+}
+
 export async function renewSubscription(subscriptionId: string): Promise<void> {
   const client = getGraphClient();
   const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
@@ -123,6 +144,59 @@ export async function primeListItemDelta(siteId: string, listId: string): Promis
   const page = (await client
     .api(`/sites/${siteId}/lists/${listId}/items/delta?token=latest`)
     .get()) as DeltaPage;
+  return page["@odata.deltaLink"] ?? null;
+}
+
+// ── Drive Delta (document library monitoring) ────────────────────────────────
+
+export interface DriveDeltaItem {
+  id: string;
+  name?: string;
+  eTag?: string;
+  size?: number;
+  lastModifiedDateTime?: string;
+  deleted?: { state: string };
+  file?: { mimeType?: string };
+  folder?: unknown;
+  parentReference?: { driveId?: string };
+}
+
+interface DriveDeltaPage {
+  value?: DriveDeltaItem[];
+  "@odata.nextLink"?: string;
+  "@odata.deltaLink"?: string;
+}
+
+/** Returns the id of the site's default document library drive. */
+export async function getSiteDefaultDriveId(siteId: string): Promise<string> {
+  const client = getGraphClient();
+  const drive = (await client.api(`/sites/${siteId}/drive`).select("id").get()) as { id: string };
+  return drive.id;
+}
+
+/** Fetches changed drive items since the delta link (files and folders). */
+export async function fetchDriveDelta(
+  driveId: string,
+  deltaLink?: string
+): Promise<{ items: DriveDeltaItem[]; deltaLink: string | null }> {
+  const client = getGraphClient();
+  let url = deltaLink ?? `/drives/${driveId}/root/delta`;
+  const items: DriveDeltaItem[] = [];
+
+  for (;;) {
+    const page = (await client.api(url).get()) as DriveDeltaPage;
+    items.push(...(page.value ?? []));
+    if (page["@odata.nextLink"]) {
+      url = page["@odata.nextLink"];
+      continue;
+    }
+    return { items, deltaLink: page["@odata.deltaLink"] ?? null };
+  }
+}
+
+export async function primeDriveDelta(driveId: string): Promise<string | null> {
+  const client = getGraphClient();
+  const page = (await client.api(`/drives/${driveId}/root/delta?token=latest`).get()) as DriveDeltaPage;
   return page["@odata.deltaLink"] ?? null;
 }
 

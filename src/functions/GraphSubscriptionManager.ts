@@ -2,12 +2,16 @@ import { app, Timer, InvocationContext } from "@azure/functions";
 import {
   listSubscriptionRecords,
   upsertSubscriptionRecord,
+  docsRecordId,
   SubscriptionRecord,
 } from "../services/cosmosDbService";
 import {
   createSharePointSubscription,
+  createDriveSubscription,
   renewSubscription,
   primeListItemDelta,
+  primeDriveDelta,
+  getSiteDefaultDriveId,
 } from "../services/graphService";
 import { parseProjectConfigs } from "../utils/projectConfig";
 import { bootstrapMasterScope } from "../services/scopeBootstrapper";
@@ -45,7 +49,10 @@ async function graphSubscriptionManagerHandler(_timer: Timer, context: Invocatio
 
       // Subscription may have been deleted externally — re-create it
       try {
-        const newId = await createSharePointSubscription(record.siteId, record.listId, notificationUrl);
+        const newId =
+          record.resourceType === "drive" && record.driveId
+            ? await createDriveSubscription(record.driveId, notificationUrl)
+            : await createSharePointSubscription(record.siteId, record.listId, notificationUrl);
         const newExpiry = new Date(Date.now() + SUBSCRIPTION_LIFETIME_MS).toISOString();
         await upsertSubscriptionRecord({ ...record, subscriptionId: newId, expiresAt: newExpiry });
         context.log(`Re-created subscription for project ${record.projectId} as ${newId}`);
@@ -57,10 +64,34 @@ async function graphSubscriptionManagerHandler(_timer: Timer, context: Invocatio
 
   // Bootstrap subscriptions for projects not yet registered
   const projectConfigs = parseProjectConfigs();
-  const registeredProjects = new Set(existing.map((r) => r.projectId));
+  const registeredIds = new Set(existing.map((r) => r.id));
 
   for (const config of projectConfigs) {
-    if (registeredProjects.has(config.projectId)) continue;
+    // Document-library subscription (monitors new/changed documents)
+    if (!registeredIds.has(docsRecordId(config.projectId))) {
+      try {
+        const driveId = await getSiteDefaultDriveId(config.siteId);
+        const subscriptionId = await createDriveSubscription(driveId, notificationUrl);
+        const deltaLink = (await primeDriveDelta(driveId)) ?? undefined;
+        await upsertSubscriptionRecord({
+          id: docsRecordId(config.projectId),
+          projectId: config.projectId,
+          subscriptionId,
+          siteId: config.siteId,
+          listId: config.listId,
+          expiresAt: new Date(Date.now() + SUBSCRIPTION_LIFETIME_MS).toISOString(),
+          notificationUrl,
+          deltaLink,
+          resourceType: "drive",
+          driveId,
+        });
+        context.log(`Created document subscription for project ${config.projectId}: ${subscriptionId}`);
+      } catch (err) {
+        context.error(`Failed to create document subscription for project ${config.projectId}:`, err);
+      }
+    }
+
+    if (registeredIds.has(config.projectId)) continue;
     try {
       const subscriptionId = await createSharePointSubscription(
         config.siteId,
@@ -78,6 +109,7 @@ async function graphSubscriptionManagerHandler(_timer: Timer, context: Invocatio
         expiresAt: new Date(Date.now() + SUBSCRIPTION_LIFETIME_MS).toISOString(),
         notificationUrl,
         deltaLink,
+        resourceType: "list",
       };
       await upsertSubscriptionRecord(record);
       context.log(`Created new subscription for project ${config.projectId}: ${subscriptionId}`);

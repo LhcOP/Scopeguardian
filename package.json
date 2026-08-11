@@ -19,8 +19,10 @@
     "@azure/identity": "^4.3.0",
     "@azure/search-documents": "^12.1.0",
     "@azure/storage-blob": "^12.24.0",
+    "@kenjiuno/msgreader": "^1.28.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "botbuilder": "^4.23.0",
+    "mailparser": "^3.9.15",
     "mammoth": "^1.12.1",
     "openai": "^4.52.0",
     "pdf-parse": "^2.4.5",
@@ -29,6 +31,7 @@
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^20.14.10",
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^7.16.0",

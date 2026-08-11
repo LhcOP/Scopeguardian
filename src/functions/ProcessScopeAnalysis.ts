@@ -1,19 +1,30 @@
 import { app, InvocationContext } from "@azure/functions";
-import { AnalysisQueueMessage } from "../models/TaskEvent";
+import { v4 as uuidv4 } from "uuid";
+import { AnalysisQueueMessage, TaskEvent } from "../models/TaskEvent";
 import {
   getSubscriptionRecord,
+  getSubscriptionRecordById,
+  docsRecordId,
   upsertSubscriptionRecord,
   tryMarkEventProcessed,
   unmarkEventProcessed,
+  SubscriptionRecord,
 } from "../services/cosmosDbService";
 import {
   fetchListItemDelta,
   primeListItemDelta,
   mapListItemToTaskEvent,
+  fetchDriveDelta,
+  primeDriveDelta,
+  downloadDriveItemContent,
 } from "../services/graphService";
-import { analyzeTaskEvent } from "../services/scopeAnalyzer";
+import { analyzeTaskEvent, analyzeDocumentEvent } from "../services/scopeAnalyzer";
 import { bootstrapMasterScope } from "../services/scopeBootstrapper";
 import { downloadMasterScope } from "../services/blobStorageService";
+import { extractTextFromFile, isSupportedDocument } from "../utils/documentText";
+
+const MAX_DOC_FILE_BYTES = 15 * 1024 * 1024;
+const MAX_DOC_TEXT_CHARS = 40_000;
 
 /**
  * Queue-triggered worker — runs the delta query for the notified list,
@@ -28,6 +39,11 @@ async function processScopeAnalysisHandler(
   const msg = queueItem as AnalysisQueueMessage;
   if (!msg?.projectId || !msg.siteId || !msg.listId) {
     context.error("Invalid queue message — dropping:", JSON.stringify(queueItem));
+    return;
+  }
+
+  if (msg.resource === "drive") {
+    await processDriveDelta(msg, context);
     return;
   }
 
@@ -89,6 +105,87 @@ async function processScopeAnalysisHandler(
 
   context.log(
     `Analysis complete for project ${msg.projectId}: ${analyzed} item(s) analysed, ${violations} violation(s)`
+  );
+}
+
+/**
+ * Drive branch: delta over the project's document library — new/changed
+ * documents (pdf, Word, emails, spreadsheets) are text-extracted and
+ * analysed against the master scope.
+ */
+async function processDriveDelta(msg: AnalysisQueueMessage, context: InvocationContext): Promise<void> {
+  const record = await getSubscriptionRecordById(docsRecordId(msg.projectId), msg.projectId);
+  if (!record?.driveId) {
+    context.warn(`No document subscription record for project ${msg.projectId} — dropping message`);
+    return;
+  }
+
+  if (!record.deltaLink) {
+    const primed = await primeDriveDelta(record.driveId);
+    if (primed) await upsertSubscriptionRecord({ ...record, deltaLink: primed });
+    context.warn(`Drive delta primed for project ${msg.projectId} — this notification is skipped`);
+    return;
+  }
+
+  const { items, deltaLink } = await fetchDriveDelta(record.driveId, record.deltaLink);
+  const files = items.filter((i) => i.file && !i.deleted && i.name);
+  context.log(`Drive delta returned ${files.length} changed file(s) for project ${msg.projectId}`);
+
+  let analyzed = 0;
+  let violations = 0;
+
+  for (const item of files) {
+    const name = item.name ?? "";
+    if (!isSupportedDocument(name)) {
+      context.log(`Skipping unsupported document type: ${name}`);
+      continue;
+    }
+    if ((item.size ?? 0) > MAX_DOC_FILE_BYTES) {
+      context.warn(`Skipping oversized document: ${name} (${item.size} bytes)`);
+      continue;
+    }
+
+    const version = item.eTag ?? item.lastModifiedDateTime ?? "unknown";
+    const isNew = await tryMarkEventProcessed(msg.projectId, `doc-${item.id}`, version);
+    if (!isNew) continue;
+
+    try {
+      const buffer = await downloadDriveItemContent(record.driveId, item.id);
+      const text = await extractTextFromFile(name, buffer);
+      if (!text?.trim()) {
+        context.log(`No text extracted from ${name} — skipping`);
+        continue;
+      }
+
+      const taskEvent: TaskEvent = {
+        eventId: uuidv4(),
+        projectId: msg.projectId,
+        eventType: "document_added",
+        occurredAt: new Date().toISOString(),
+        source: "sharepoint",
+        task: {
+          id: `doc-${item.id}`,
+          title: `Dokument: ${name}`,
+          description: text.slice(0, 500),
+          tags: ["document"],
+        },
+      };
+
+      violations += await analyzeDocumentEvent(taskEvent, text.slice(0, MAX_DOC_TEXT_CHARS), context);
+      analyzed++;
+    } catch (err) {
+      await unmarkEventProcessed(msg.projectId, `doc-${item.id}`, version);
+      context.error(`Document analysis failed for ${name} in project ${msg.projectId}:`, err);
+      throw err;
+    }
+  }
+
+  if (deltaLink) {
+    await upsertSubscriptionRecord({ ...record, deltaLink } as SubscriptionRecord);
+  }
+
+  context.log(
+    `Document analysis complete for project ${msg.projectId}: ${analyzed} document(s) analysed, ${violations} violation(s)`
   );
 }
 

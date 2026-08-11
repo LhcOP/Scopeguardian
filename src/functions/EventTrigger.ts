@@ -64,8 +64,10 @@ async function eventTriggerHandler(
         listId: record.listId,
         subscriptionId: change.subscriptionId,
         notifiedAt: new Date().toISOString(),
+        resource: record.resourceType ?? "list",
+        driveId: record.driveId,
       });
-      context.log(`Queued analysis for project ${record.projectId}`);
+      context.log(`Queued ${record.resourceType ?? "list"} analysis for project ${record.projectId}`);
     } catch (err) {
       context.error(`Failed to resolve subscription ${change.subscriptionId}:`, err);
     }

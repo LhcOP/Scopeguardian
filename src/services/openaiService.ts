@@ -1,7 +1,7 @@
 import { AzureOpenAI } from "openai";
 import { ProjectScope, ScopeItem, ScopeViolation } from "../models/ProjectScope";
 import { TaskEvent } from "../models/TaskEvent";
-import { countTokens } from "../utils/tokenOptimizer";
+import { countTokens, truncateToTokens } from "../utils/tokenOptimizer";
 import { v4 as uuidv4 } from "uuid";
 
 // Azure OpenAI uses deployment names — configurable per environment
@@ -203,6 +203,52 @@ export function parseViolationPayload(content: string): RawViolation[] {
       VALID_SEVERITIES.has(String((v as Record<string, unknown>).severity)) &&
       typeof (v as Record<string, unknown>).reasoning === "string"
   );
+}
+
+// ── Document Scope Analysis ───────────────────────────────────────────────────
+
+/**
+ * Analyses a document added to the project (email, minutes, requirement doc)
+ * against the master scope: does it introduce requests, commitments or
+ * requirements outside the agreed scope, or anything affecting hours/deadlines?
+ */
+export async function detectScopeViolationsInDocument(
+  taskEvent: TaskEvent,
+  documentText: string,
+  relevantScopeItems: ScopeItem[],
+  projectOutOfScope: string[]
+): Promise<ScopeViolation[]> {
+  const scopeContext = buildScopeContext(relevantScopeItems, projectOutOfScope);
+  const docContext = `Document: ${taskEvent.task.title}\n\nCONTENT:\n${truncateToTokens(documentText, MAX_CHUNK_TOKENS)}`;
+
+  const client = getClient();
+  const chunks = chunkText(scopeContext, MAX_CHUNK_TOKENS);
+  const mapResults = await Promise.all(
+    chunks.map(async (chunk) => {
+      const response = await client.chat.completions.create({
+        model: MINI_MODEL,
+        temperature: 0,
+        max_tokens: 1024,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a project scope analyst. A document (email, meeting minutes, requirement doc) " +
+              "was added to the project. Against the provided scope portion, identify: " +
+              "(1) requests or commitments for work not covered by the scope items, " +
+              "(2) anything matching the OUT OF SCOPE list, " +
+              "(3) changes affecting hours, deadlines or deliverables. " +
+              "Quote the specific passages that indicate scope creep. Be concise. " +
+              'Output JSON: {"potentialCreep": boolean, "indicators": string[], "outOfScopeMatch": boolean, "quotes": string[], "notes": string}',
+          },
+          { role: "user", content: `SCOPE PORTION:\n${chunk}\n\nDOCUMENT:\n${docContext}` },
+        ],
+      });
+      return response.choices[0].message.content ?? "";
+    })
+  );
+
+  return reduceToViolations(mapResults.join("\n\n---\n\n"), docContext, taskEvent, relevantScopeItems.map((i) => i.id));
 }
 
 // ── Automatic Scope Generation ────────────────────────────────────────────────

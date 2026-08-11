@@ -4,7 +4,8 @@ export type TaskEventType =
   | "task_assigned"
   | "task_completed"
   | "time_logged"
-  | "comment_added";
+  | "comment_added"
+  | "document_added";
 
 export interface TaskEvent {
   eventId: string;
@@ -44,6 +45,9 @@ export interface AnalysisQueueMessage {
   listId: string;
   subscriptionId: string;
   notifiedAt: string;
+  /** "list" (task list, default) or "drive" (document library). */
+  resource?: "list" | "drive";
+  driveId?: string;
 }
 
 export interface GraphChangeNotification {

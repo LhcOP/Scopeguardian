@@ -1,8 +1,10 @@
 import * as mammoth from "mammoth";
 import * as XLSX from "xlsx";
 import { PDFParse } from "pdf-parse";
+import { simpleParser } from "mailparser";
+import MsgReader from "@kenjiuno/msgreader";
 
-export const SUPPORTED_DOC_EXTENSIONS = [".docx", ".pdf", ".xlsx", ".txt", ".md"];
+export const SUPPORTED_DOC_EXTENSIONS = [".docx", ".pdf", ".xlsx", ".txt", ".md", ".eml", ".msg"];
 
 export function isSupportedDocument(fileName: string): boolean {
   const lower = fileName.toLowerCase();
@@ -38,6 +40,31 @@ export async function extractTextFromFile(fileName: string, buffer: Buffer): Pro
     }
     if (lower.endsWith(".txt") || lower.endsWith(".md")) {
       return buffer.toString("utf8");
+    }
+    if (lower.endsWith(".eml")) {
+      const mail = await simpleParser(buffer);
+      const parts = [
+        mail.from?.text ? `From: ${mail.from.text}` : "",
+        mail.to && !Array.isArray(mail.to) ? `To: ${mail.to.text}` : "",
+        mail.subject ? `Subject: ${mail.subject}` : "",
+        mail.date ? `Date: ${mail.date.toISOString()}` : "",
+        "",
+        mail.text ?? "",
+      ];
+      return parts.filter((p, i) => p || i === 4).join("\n");
+    }
+    if (lower.endsWith(".msg")) {
+      const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+      const reader = new MsgReader(arrayBuffer as ArrayBuffer);
+      const data = reader.getFileData();
+      const parts = [
+        data.senderName ? `From: ${data.senderName} <${data.senderEmail ?? ""}>` : "",
+        data.subject ? `Subject: ${data.subject}` : "",
+        data.messageDeliveryTime ? `Date: ${data.messageDeliveryTime}` : "",
+        "",
+        data.body ?? "",
+      ];
+      return parts.filter((p, i) => p || i === 3).join("\n");
     }
     return null;
   } catch {

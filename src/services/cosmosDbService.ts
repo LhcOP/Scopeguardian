@@ -171,7 +171,7 @@ export async function getScopeSummary(projectId: string): Promise<ScopeSummary |
 // ── Graph Subscription Records ───────────────────────────────────────────────
 
 export interface SubscriptionRecord {
-  id: string; // == projectId
+  id: string; // projectId for the task list, `${projectId}-docs` for the document library
   projectId: string;
   subscriptionId: string;
   siteId: string;
@@ -180,6 +180,14 @@ export interface SubscriptionRecord {
   notificationUrl: string;
   /** Graph delta link — consumed and refreshed by the analysis worker. */
   deltaLink?: string;
+  /** "list" (task list, default) or "drive" (document library). */
+  resourceType?: "list" | "drive";
+  driveId?: string;
+}
+
+/** Record id for a project's document-library subscription. */
+export function docsRecordId(projectId: string): string {
+  return `${projectId}-docs`;
 }
 
 export async function upsertSubscriptionRecord(record: SubscriptionRecord): Promise<void> {
@@ -196,9 +204,16 @@ export async function listSubscriptionRecords(): Promise<SubscriptionRecord[]> {
 }
 
 export async function getSubscriptionRecord(projectId: string): Promise<SubscriptionRecord | null> {
+  return getSubscriptionRecordById(projectId, projectId);
+}
+
+export async function getSubscriptionRecordById(
+  id: string,
+  projectId: string
+): Promise<SubscriptionRecord | null> {
   const container = await getContainer(CONTAINERS.graphSubscriptions);
   try {
-    const { resource } = await container.item(projectId, projectId).read<SubscriptionRecord>();
+    const { resource } = await container.item(id, projectId).read<SubscriptionRecord>();
     return resource ?? null;
   } catch {
     return null;
