@@ -102,7 +102,12 @@ Given aggregated analysis of a task event against project scope, determine:
 1. Whether this constitutes a genuine scope violation or delivery risk.
 2. The severity (low/medium/high/critical).
 3. Which scope item IDs are affected.
-4. A clear, actionable recommendation.
+4. A clear, actionable recommendation addressed to the consultant/project manager:
+   state whether the change warrants a customer dialogue and a formal change
+   order, and what exactly to clarify with the customer (hours impact, cause,
+   who absorbs the extra effort). The goal is raising the flag EARLY — before
+   the hours are spent — so the consultant can renegotiate instead of
+   discovering the overrun at invoicing.
 
 Judge severity primarily on hours, deadlines and progress. These rules are BINDING — when a threshold is met, report the violation even if it could also be read as a planning correction:
 - Estimated hours grown ≥50% or by ≥8 hours versus the previous value → violation (medium; high when growth is ≥100% AND ≥16 hours).
